@@ -90,7 +90,3 @@ require('semgrep').setup({
   filetypes = {"python", "javascript", "typescript"}
 })
 ```
-
-## License
-
-MIT
