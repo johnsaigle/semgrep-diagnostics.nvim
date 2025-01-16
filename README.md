@@ -11,10 +11,9 @@ A Neovim plugin that integrates [semgrep](https://semgrep.dev/) with the built-i
 ## Installation
 
 Using [lazy.nvim](https://github.com/folke/lazy.nvim):
-
 ```lua
 {
-  "yourusername/semgrep.nvim",
+  "johnsaigle/semgrep.nvim",
   dependencies = { "jose-elias-alvarez/null-ls.nvim" },
   opts = {
     -- your configuration
@@ -25,7 +24,6 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 ## Configuration
 
 Here's an example configuration with all available options and their defaults:
-
 ```lua
 require('semgrep').setup({
   -- Enable/disable the plugin
@@ -37,6 +35,8 @@ require('semgrep').setup({
   -- - "p/ci" (use semgrep's CI rules)
   -- - "p/security-audit" (use security audit rules)
   -- - or any other valid semgrep rule set
+  -- - or a table of multiple configurations:
+  --   {"p/python", "~/path/to/custom/rules.yaml"}
   semgrep_config = "auto",
   
   -- Map semgrep severities to nvim diagnostic severities
@@ -60,19 +60,48 @@ require('semgrep').setup({
 
 ## Usage
 
-Once configured, the plugin will automatically run semgrep on your files and display the results as diagnostics in Neovim. The diagnostics will update whenever you save a file.
+Once configured, the plugin will automatically run semgrep on your files and display the results as diagnostics in Neovim. The diagnostics will update whenever you:
+- Open a file
+- Save a file
+- Load a new buffer
+
+### Viewing Diagnostics
 
 You can use any of Neovim's built-in diagnostic features to navigate and view the semgrep results:
-
 - `:lua vim.diagnostic.open_float()` - Show diagnostic in a floating window
 - `:lua vim.diagnostic.goto_next()` - Go to next diagnostic
 - `:lua vim.diagnostic.goto_prev()` - Go to previous diagnostic
 - `:lua vim.diagnostic.setqflist()` - Put diagnostics in quickfix list
 
+### Enhanced Diagnostic Information
+
+The plugin provides detailed information about semgrep rules in diagnostics:
+- Rule ID is appended to each diagnostic message
+  - Rule ID
+  - Rule source
+  - Category
+  - Technology
+  - Confidence level
+  - References (if available)
+
+### Plugin Commands
+
+The plugin provides several utility functions that you can map to keys:
+
+```lua
+-- Toggle the plugin on/off
+vim.keymap.set('n', '<leader>st', require('semgrep').toggle, { desc = 'Toggle Semgrep' })
+
+-- Display current configuration
+vim.keymap.set('n', '<leader>sc', require('semgrep').print_config, { desc = 'Show Semgrep config' })
+
+-- View rule details (alternative to K)
+vim.keymap.set('n', '<leader>sd', require('semgrep').show_rule_details, { desc = 'Show Semgrep rule details' })
+```
+
 ## Examples
 
 ### Using with specific rule sets
-
 ```lua
 -- Use security audit rules
 require('semgrep').setup({
@@ -81,7 +110,11 @@ require('semgrep').setup({
 
 -- Use multiple rule sets
 require('semgrep').setup({
-  semgrep_config = "p/security-audit,p/ci",
+  semgrep_config = {
+    "p/security-audit",
+    "p/python",
+    "~/path/to/custom/rules.yaml"
+  },
   extra_args = {"--max-target-bytes", "1000000"}
 })
 
