@@ -26,7 +26,11 @@ M.default_config = {
 M.config = {}
 
 function M.toggle()
-	M.config.enabled = !M.config.enabled
+	if M.config.enabled then
+		M.config.enabled = false
+	else
+		M.config.enavled = true
+	end
 end
 
 -- Setup function to initialize the plugin
