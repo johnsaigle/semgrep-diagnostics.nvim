@@ -1,11 +1,13 @@
--- lua/semgrep/init.lua
 local M = {}
 
+local namespace = nil
+
 -- Default configuration
-M.default_config = {
+local defaults = {
 	-- Enable the plugin by default
 	enabled = true,
 	-- Default semgrep configuration
+	-- semgrep_config = "~/coding/semgrep-rules-ar",
 	semgrep_config = "auto",
 	-- Severity mapping
 	severity_map = {
@@ -22,25 +24,46 @@ M.default_config = {
 	filetypes = {},
 }
 
--- Store user config
-M.config = {}
+M.config = vim.deepcopy(defaults)
 
-function M.toggle()
-	if M.config.enabled then
-		M.config.enabled = false
-	else
-		M.config.enavled = true
+-- Debug function to print current config.
+function M.print_config()
+	print("Current Semgrep Configuration:")
+	for k, v in pairs(M.config) do
+		if type(v) == "table" then
+			print(string.format("%s: %s", k, vim.inspect(v)))
+		else
+			print(string.format("%s: %s", k, tostring(v)))
+		end
 	end
 end
 
--- Setup function to initialize the plugin
-function M.setup(opts)
-	M.config = vim.tbl_deep_extend("force", M.default_config, opts or {})
-
-	if not M.config.enabled then
-		return
+-- Function to toggle the plugin. Clears current diagnostics.
+function M.toggle()
+	if not namespace then
+		namespace = vim.api.nvim_create_namespace("semgrep-nvim")
 	end
 
+	-- Toggle the enabled state
+	M.config.enabled = not M.config.enabled
+	if not M.config.enabled then
+		-- Clear all diagnostics when disabling
+		-- Get all buffers
+		local bufs = vim.api.nvim_list_bufs()
+		for _, buf in ipairs(bufs) do
+			if vim.api.nvim_buf_is_valid(buf) then
+				vim.diagnostic.reset(namespace, buf)
+			end
+		end
+		vim.notify("Semgrep diagnostics disabled", vim.log.levels.INFO)
+	else
+		vim.notify("Semgrep diagnostics enabled", vim.log.levels.INFO)
+		M.semgrep()
+	end
+end
+
+-- Run semgrep and populate diagnostics with the results.
+function M.semgrep()
 	-- Load and setup null-ls integration
 	local null_ls_ok, null_ls = pcall(require, "null-ls")
 	if not null_ls_ok then
@@ -50,6 +73,7 @@ function M.setup(opts)
 
 	local semgrep_generator = {
 		method = null_ls.methods.DIAGNOSTICS,
+		-- NOTE: unused
 		filetypes = M.config.filetypes,
 		generator = {
 			fn = function(params)
@@ -69,6 +93,7 @@ function M.setup(opts)
 					"--config=" .. M.config.semgrep_config,
 					filepath
 				}
+				-- vim.notify("Running with config: " .. M.config.semgrep_config, vim.log.levels.ERROR)
 				-- Add any extra arguments
 				for _, arg in ipairs(M.config.extra_args) do
 					table.insert(args, arg)
@@ -83,15 +108,6 @@ function M.setup(opts)
 						env = vim.env,
 					},
 					function(obj)
-						-- if obj.code ~= 0 then
-						-- 	vim.schedule(function()
-						-- 		vim.notify(
-						-- 		"semgrep error: " .. (obj.stderr or "unknown error"),
-						-- 			vim.log.levels.WARN)
-						-- 	end)
-						-- 	return
-						-- end
-
 						local diags = {}
 						-- Parse JSON output
 						local ok, parsed = pcall(vim.json.decode, obj.stdout)
@@ -101,8 +117,8 @@ function M.setup(opts)
 								local severity = M.config.default_severity
 								if result.extra.severity then
 									severity = M.config.severity_map
-									[result.extra.severity] or
-									M.config.default_severity
+									    [result.extra.severity] or
+									    M.config.default_severity
 								end
 
 								local diag = {
@@ -120,7 +136,7 @@ function M.setup(opts)
 							-- Schedule the diagnostic updates
 							vim.schedule(function()
 								local namespace = vim.api.nvim_create_namespace(
-								"semgrep-nvim")
+									"semgrep-nvim")
 								vim.diagnostic.set(namespace, params.bufnr, diags)
 							end)
 						end
@@ -133,6 +149,21 @@ function M.setup(opts)
 	}
 
 	null_ls.register(semgrep_generator)
+
+end
+
+-- Setup function to initialize the plugin
+function M.setup(opts)
+	if opts then
+		for k, v in pairs(opts) do
+			M.config[k] = v
+		end
+	end
+
+	if M.config.enabled then
+		M.semgrep()
+	end
+
 end
 
 return M
