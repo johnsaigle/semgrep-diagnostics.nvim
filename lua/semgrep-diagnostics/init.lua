@@ -25,6 +25,10 @@ M.default_config = {
 -- Store user config
 M.config = {}
 
+function M.toggle()
+	M.config.enabled = !M.config.enabled
+end
+
 -- Setup function to initialize the plugin
 function M.setup(opts)
 	M.config = vim.tbl_deep_extend("force", M.default_config, opts or {})
