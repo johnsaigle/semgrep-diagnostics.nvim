@@ -22,21 +22,56 @@ local defaults = {
 	extra_args = {},
 	-- Filetypes to run semgrep on, empty means all filetypes
 	filetypes = {},
+	keymaps = {
+		-- Set to empty string or false to disable
+		set_severity = "<leader>ss",
+	},
 }
 
 M.config = vim.deepcopy(defaults)
 
--- Debug function to print current config.
+function M.setup_keymaps()
+	if M.config.keymaps.set_severity then
+		vim.keymap.set('n', M.config.keymaps.set_severity, function()
+			vim.ui.select(
+				{ "ERROR", "WARN", "INFO", "HINT" },
+				{
+					prompt = "Select minimum severity level:",
+					format_item = function(item)
+						return string.format("%s (%d)", item, vim.diagnostic.severity[item])
+					end,
+				},
+				function(choice)
+					if choice then
+						local severity = vim.diagnostic.severity[choice]
+						M.set_minimum_severity(severity)
+					end
+				end
+			)
+		end, { desc = "Set [s]emgrep minimum [s]everity" })
+	end
+end
+
+function M.set_minimum_severity(level)
+	if not vim.tbl_contains(vim.tbl_values(vim.diagnostic.severity), level) then
+		vim.notify("Invalid severity level", vim.log.levels.ERROR)
+		return
+	end
+	M.config.default_severity = level
+	local severity_name = vim.tbl_keys(vim.diagnostic.severity)[level + 1]
+	vim.notify(string.format("Minimum severity set to: %s", severity_name), vim.log.levels.INFO)
+end
+
 function M.print_config()
-    local config_lines = {"Current Semgrep Configuration:"}
-    for k, v in pairs(M.config) do
-        if type(v) == "table" then
-            table.insert(config_lines, string.format("%s: %s", k, vim.inspect(v)))
-        else
-            table.insert(config_lines, string.format("%s: %s", k, tostring(v)))
-        end
-    end
-    vim.notify(table.concat(config_lines, "\n"), vim.log.levels.INFO)
+	local config_lines = { "Current Semgrep Configuration:" }
+	for k, v in pairs(M.config) do
+		if type(v) == "table" then
+			table.insert(config_lines, string.format("%s: %s", k, vim.inspect(v)))
+		else
+			table.insert(config_lines, string.format("%s: %s", k, tostring(v)))
+		end
+	end
+	vim.notify(table.concat(config_lines, "\n"), vim.log.levels.INFO)
 end
 
 -- Function to toggle the plugin. Clears current diagnostics.
@@ -102,11 +137,19 @@ function M.semgrep()
 				})
 			end,
 			fn = function(params)
-				-- Get semgrep executable path
-				local semgrep_cmd = vim.fn.exepath("semgrep")
-				if semgrep_cmd == "" then
-					vim.notify("semgrep executable not found in PATH", vim.log.levels.ERROR)
-					return {}
+				-- Get semgrep or opengrep executable path
+				local cmd = ""
+				local semgrep_path = vim.fn.exepath("semgrep")
+				if semgrep_path == "" then
+					local opengrep_path = vim.fn.exepath("opengrep")
+					if opengrep_path == "" then
+						vim.notify("semgrep executable not found in PATH", vim.log.levels.ERROR)
+						return {}
+					else
+						cmd = "opengrep"
+					end
+				else
+					cmd = "semgrep"
 				end
 
 				local filepath = vim.api.nvim_buf_get_name(params.bufnr)
@@ -120,7 +163,21 @@ function M.semgrep()
 				-- Add all config paths
 				local configs = normalize_config(M.config.semgrep_config)
 				for _, config in ipairs(configs) do
-					table.insert(args, "--config=" .. config)
+					-- Include rulesets from the registry
+					if vim.startswith(config, "p/") then
+						table.insert(args, "--config=" .. config)
+					else
+						-- if using custom rulesets, first check if they exist
+						if vim.fn.filereadable(vim.fn.expand(config)) == 1 then
+							table.insert(args, "--config=" .. config)
+						else
+							vim.notify(
+								string.format("Semgrep config not found, skipping: %s",
+									config),
+								vim.log.levels.WARN
+							)
+						end
+					end
 				end
 
 				-- Add filepath
@@ -133,7 +190,7 @@ function M.semgrep()
 
 				-- Create async system command
 				vim.system(
-					vim.list_extend({ "semgrep" }, args),
+					vim.list_extend({ cmd }, args),
 					{
 						text = true,
 						cwd = vim.fn.getcwd(),
@@ -173,19 +230,24 @@ function M.semgrep()
 									-- Store additional metadata in user_data
 									user_data = {
 										rule_id = result.check_id,
-										rule_source = result.path, -- this will show which config file contained the rule
+										-- this will show which config file contained the rule
+										rule_source = result.path,
 										rule_details = {
 											category = result.extra.metadata and
-											result.extra.metadata.category,
+											    result.extra.metadata
+											    .category,
 											technology = result.extra
-											.metadata and
-											result.extra.metadata.technology,
+											    .metadata and
+											    result.extra.metadata
+											    .technology,
 											confidence = result.extra
-											.metadata and
-											result.extra.metadata.confidence,
+											    .metadata and
+											    result.extra.metadata
+											    .confidence,
 											references = result.extra
-											.metadata and
-											result.extra.metadata.references
+											    .metadata and
+											    result.extra.metadata
+											    .references
 										}
 									}
 								}
@@ -218,76 +280,77 @@ function M.setup(opts)
 		end
 	end
 
+	M.setup_keymaps()
+
 	if M.config.enabled then
 		M.semgrep()
 	end
 end
 
 function M.show_rule_details()
-    -- Get the diagnostics under the cursor
-    local cursor_pos = vim.api.nvim_win_get_cursor(0)
-    local line = cursor_pos[1] - 1
-    local col = cursor_pos[2]
-    
-    local diagnostics = vim.diagnostic.get(0, {
-        namespace = vim.api.nvim_create_namespace("semgrep-nvim"),
-        lnum = line
-    })
+	-- Get the diagnostics under the cursor
+	local cursor_pos = vim.api.nvim_win_get_cursor(0)
+	local line = cursor_pos[1] - 1
+	local col = cursor_pos[2]
+	local diagnostics = vim.diagnostic.get(0, {
+		namespace = vim.api.nvim_create_namespace("semgrep-nvim"),
+		lnum = line
+	})
 
-    -- Find the diagnostic at or closest to cursor position
-    local current_diagnostic = nil
-    for _, diagnostic in ipairs(diagnostics) do
-        if diagnostic.col <= col and col <= diagnostic.end_col then
-            current_diagnostic = diagnostic
-            break
-        end
-    end
+	-- Find the diagnostic at or closest to cursor position
+	local current_diagnostic = nil
+	for _, diagnostic in ipairs(diagnostics) do
+		if diagnostic.col <= col and col <= diagnostic.end_col then
+			current_diagnostic = diagnostic
+			break
+		end
+	end
 
-    if not current_diagnostic or not current_diagnostic.user_data then
-        vim.notify("No semgrep diagnostic found under cursor", vim.log.levels.WARN)
-        return
-    end
+	if not current_diagnostic or not current_diagnostic.user_data then
+		vim.notify("No semgrep diagnostic found under cursor", vim.log.levels.WARN)
+		return
+	end
 
-    -- Build detailed message
-    local details = {
-        string.format("Rule ID: %s", current_diagnostic.user_data.rule_id or "N/A"),
-        string.format("Source: %s", current_diagnostic.user_data.rule_source or "N/A"),
-    }
+	-- Build detailed message
+	local details = {
+		string.format("Rule ID: %s", current_diagnostic.user_data.rule_id or "N/A"),
+		string.format("Source: %s", current_diagnostic.user_data.rule_source or "N/A"),
+	}
 
-    -- Add metadata if available
-    local rule_details = current_diagnostic.user_data.rule_details
-    if rule_details then
-        if rule_details.category then
-            table.insert(details, string.format("Category: %s", rule_details.category))
-        end
-        if rule_details.technology then
-            table.insert(details, string.format("Technology: %s", rule_details.technology))
-        end
-        if rule_details.confidence then
-            table.insert(details, string.format("Confidence: %s", rule_details.confidence))
-        end
-        if rule_details.references and #rule_details.references > 0 then
-            table.insert(details, "References:")
-            for _, ref in ipairs(rule_details.references) do
-                table.insert(details, string.format("  - %s", ref))
-            end
-        end
-    end
+	-- Add metadata if available
+	local rule_details = current_diagnostic.user_data.rule_details
+	if rule_details then
+		if rule_details.category then
+			table.insert(details, string.format("Category: %s", rule_details.category))
+		end
+		if rule_details.technology then
+			table.insert(details, string.format("Technology: %s", rule_details.technology))
+		end
+		if rule_details.confidence then
+			table.insert(details, string.format("Confidence: %s", rule_details.confidence))
+		end
+		if rule_details.references and #rule_details.references > 0 then
+			table.insert(details, "References:")
+			for _, ref in ipairs(rule_details.references) do
+				table.insert(details, string.format("  - %s", ref))
+			end
+		end
+	end
 
-    -- Show in hover window
-    vim.lsp.util.open_floating_preview(
-        details,
-        'markdown',
-        {
-            border = "rounded",
-            focus = true,  -- Allow focusing the window
-            width = 80,
-            height = #details,
-            close_events = {"BufHidden", "BufLeave"},
-            focusable = true,  -- Make the window focusable
-            focus_id = "semgrep_details",  -- Unique identifier for the window
-        }
-    )
+	-- Show in hover window
+	vim.lsp.util.open_floating_preview(
+		details,
+		'markdown',
+		{
+			border = "rounded",
+			focus = true, -- Allow focusing the window
+			width = 80,
+			height = #details,
+			close_events = { "BufHidden", "BufLeave" },
+			focusable = true, -- Make the window focusable
+			focus_id = "semgrep_details", -- Unique identifier for the window
+		}
+	)
 end
-return M
 
+return M
