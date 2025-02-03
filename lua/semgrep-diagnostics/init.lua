@@ -154,21 +154,24 @@ function M.semgrep()
 
 				local filepath = vim.api.nvim_buf_get_name(params.bufnr)
 
-				-- Build command arguments
+				-- Build command arguments.
 				local args = {
 					"--json",
 					"--quiet",
 				}
 
-				-- Add all config paths
+				-- Add all config paths.
 				local configs = normalize_config(M.config.semgrep_config)
 				for _, config in ipairs(configs) do
 					-- Include rulesets from the registry
 					if vim.startswith(config, "p/") then
 						table.insert(args, "--config=" .. config)
 					else
-						-- if using custom rulesets, first check if they exist
-						if vim.fn.filereadable(vim.fn.expand(config)) == 1 then
+						-- If using custom rulesets, first check if they exist. 
+						-- Allow for single files or directories
+						local path = vim.fn.expand(config)
+						vim.notify("Checking " .. path, vim.log.levels.INFO)
+						if vim.fn.filereadable(path) == 1 or vim.fn.isdirectory(path) == 1 then
 							table.insert(args, "--config=" .. config)
 						else
 							vim.notify(
