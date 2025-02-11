@@ -75,7 +75,6 @@ function M.semgrep()
 						-- If using custom rulesets, first check if they exist. 
 						-- Allow for single files or directories.
 						local path = vim.fn.expand(ruleset)
-						-- vim.notify("Checking " .. path, vim.log.levels.INFO)
 						if vim.fn.filereadable(path) == 1 or vim.fn.isdirectory(path) == 1 then
 							table.insert(args, "--config=" .. ruleset)
 						else

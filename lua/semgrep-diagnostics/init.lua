@@ -17,7 +17,6 @@ function M.setup(opts)
 		end,
 	})
 
-	config.print_config()
 	if config.enabled then
 		semgrep.semgrep()
 	end
