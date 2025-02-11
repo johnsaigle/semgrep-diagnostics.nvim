@@ -3,9 +3,14 @@ local M = {}
 local namespace = nil
 local config = require('semgrep-diagnostics.config')
 
+local function is_valid_diagnostic(result)
+	return result.extra and
+		result.extra.severity and
+		result.extra.message
+end
+
 -- Run semgrep and populate diagnostics with the results.
 function M.semgrep()
-	vim.notify("running", vim.log.levels.WARN)
 	-- Load and setup null-ls integration
 	local null_ls_ok, null_ls = pcall(require, "null-ls")
 	if not null_ls_ok then
@@ -62,13 +67,15 @@ function M.semgrep()
 				local configs = config.normalize_config(config.semgrep_config)
 				for _, ruleset in ipairs(configs) do
 					-- Include rulesets from the registry
-					if vim.startswith(ruleset, "p/") then
+					if vim.startswith(ruleset, "p/")
+						-- also allow the special "auto" option
+						or ruleset == "auto" then
 						table.insert(args, "--config=" .. ruleset)
 					else
 						-- If using custom rulesets, first check if they exist. 
 						-- Allow for single files or directories.
 						local path = vim.fn.expand(ruleset)
-						vim.notify("Checking " .. path, vim.log.levels.INFO)
+						-- vim.notify("Checking " .. path, vim.log.levels.INFO)
 						if vim.fn.filereadable(path) == 1 or vim.fn.isdirectory(path) == 1 then
 							table.insert(args, "--config=" .. ruleset)
 						else
@@ -85,13 +92,20 @@ function M.semgrep()
 				table.insert(args, filepath)
 
 				-- Add any extra arguments
-				for _, arg in ipairs(config.config.extra_args) do
+				for _, arg in ipairs(config.extra_args) do
 					table.insert(args, arg)
 				end
 
 				-- Create async system command
+				local full_cmd = vim.list_extend({ cmd }, args)
+
+				-- TODO check nil when creating the file handle
+				local f = io.open("/tmp/nvim_debug.log", "a")
+				f:write(vim.inspect(vim.fn.join(full_cmd, " ")) .. "\n")
+				f:close()
+
 				vim.system(
-					vim.list_extend({ cmd }, args),
+					full_cmd,
 					{
 						text = true,
 						cwd = vim.fn.getcwd(),
@@ -102,59 +116,60 @@ function M.semgrep()
 						-- Parse JSON output
 						local ok, parsed = pcall(vim.json.decode, obj.stdout)
 						if ok and parsed then
-							-- Convert results to diagnostics
 							local f = io.open("/tmp/nvim_debug.log", "a")
 							f:write(vim.inspect(parsed) .. "\n")
 							f:close()
 
-
+							-- Convert results to diagnostics
 							for _, result in ipairs(parsed.results) do
-								local severity = result.extra.severity and
-								    config.config.severity_map[result.extra.severity] or
-								    config.config.default_severity
+								if is_valid_diagnostic(result) then
+									local severity = result.extra.severity and
+									    config.severity_map[result.extra.severity] or
+									    config.default_severity
 
-								-- Build the diagnostic message with rule information
-								local message = result.extra.message
-								if result.check_id then
-									message = string.format("%s [%s]",
-										message,
-										result.check_id
-									)
-								end
+									-- Build the diagnostic message with rule information
+									local message = result.extra.message
+									if result.check_id then
+										message = string.format("%s [%s]",
+											message,
+											result.check_id
+										)
+									end
 
-								local diag = {
-									lnum = result.start.line - 1,
-									col = result.start.col,
-									end_lnum = result["end"].line - 1,
-									end_col = result["end"].col,
-									source = "semgrep",
-									message = message,
-									severity = severity,
-									-- Store additional metadata in user_data
-									user_data = {
-										rule_id = result.check_id,
-										-- this will show which config file contained the rule
-										rule_source = result.path,
-										rule_details = {
-											category = result.extra.metadata and
-											    result.extra.metadata
-											    .category,
-											technology = result.extra
-											    .metadata and
-											    result.extra.metadata
-											    .technology,
-											confidence = result.extra
-											    .metadata and
-											    result.extra.metadata
-											    .confidence,
-											references = result.extra
-											    .metadata and
-											    result.extra.metadata
-											    .references
+									local diag = {
+										lnum = result.start.line - 1,
+										col = result.start.col - 1,
+										end_lnum = result["end"].line - 1,
+										end_col = result["end"].col - 1,
+										source = "semgrep",
+										message = message,
+										severity = severity,
+										-- Store additional metadata in user_data
+										user_data = {
+											rule_id = result.check_id,
+											-- this will show which config file contained the rule
+											rule_source = result.path,
+											rule_details = {
+												category = result.extra.metadata and
+												    result.extra.metadata
+												    .category,
+												technology = result.extra
+												    .metadata and
+												    result.extra.metadata
+												    .technology,
+												confidence = result.extra
+												    .metadata and
+												    result.extra.metadata
+												    .confidence,
+												references = result.extra
+												    .metadata and
+												    result.extra.metadata
+												    .references
+											}
 										}
 									}
-								}
-								table.insert(diags, diag)
+									table.insert(diags, diag)
+								end
 							end
 
 							-- Schedule the diagnostic updates

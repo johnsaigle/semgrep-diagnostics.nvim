@@ -3,25 +3,27 @@ local M = {}
 local semgrep = require('semgrep-diagnostics.semgrep')
 local config = require('semgrep-diagnostics.config')
 
--- Setup function to initialize the plugin
+-- TODO
 function M.setup(opts)
-	if opts then
-		for k, v in pairs(opts) do
-			M.config[k] = v
-		end
-	end
+	config.setup(opts)
 
-	config.setup()
-	config.setup_keymaps()
-	-- config.print_config()
+	-- Set up autocommands to attach to appropriate filetypes
+	local group = vim.api.nvim_create_augroup("SemgrepDiagnostics", { clear = true })
+	vim.api.nvim_create_autocmd("FileType", {
+		group = group,
+		pattern = config.filetypes,
+		callback = function(args)
+			config.on_attach(args.buf)
+		end,
+	})
 
-	if config.config.enabled then
+	config.print_config()
+	if config.enabled then
 		semgrep.semgrep()
 	end
 end
 
 -- Re-export the config for other modules to use
--- TODO
 M.config = config
 
 return M
