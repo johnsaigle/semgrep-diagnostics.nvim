@@ -11,7 +11,6 @@ end
 
 -- Run semgrep and populate diagnostics with the results.
 function M.semgrep()
-	-- Load and setup null-ls integration
 	local null_ls_ok, null_ls = pcall(require, "null-ls")
 	if not null_ls_ok then
 		vim.notify("null-ls is required for semgrep-nvim", vim.log.levels.ERROR)
@@ -20,24 +19,11 @@ function M.semgrep()
 
 	local semgrep_generator = {
 		method = null_ls.methods.DIAGNOSTICS,
-		-- NOTE: unused
 		filetypes = config.filetypes,
 		generator = {
 			-- Configure when to run the diagnostics
 			runtime_condition = function()
 				return config.enabled
-			end,
-			-- Run on file open and after saves
-			on_attach = function(client, bufnr)
-				vim.api.nvim_buf_attach(bufnr, false, {
-					on_load = function()
-						if config.enabled then
-							null_ls.generator()(
-								{ bufnr = bufnr }
-							)
-						end
-					end
-				})
 			end,
 			fn = function(params)
 				-- Get semgrep or opengrep executable path
