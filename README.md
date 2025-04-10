@@ -1,11 +1,11 @@
 # semgrep-diagnostics.nvim
 
-A Neovim plugin that integrates [semgrep](https://semgrep.dev/) with the built-in diagnostic system using null-ls.
+A Neovim plugin that integrates [semgrep](https://semgrep.dev/) with the built-in diagnostic system.
 
 ## Prerequisites
 
 - Neovim 0.8 or higher
-- [null-ls.nvim](https://github.com/jose-elias-alvarez/null-ls.nvim)
+- [none-ls.nvim](https://github.com/nvimtools/none-ls.nvim)
 - [semgrep](https://semgrep.dev/docs/getting-started/) installed and available in PATH
 
 ## Installation
@@ -13,8 +13,8 @@ A Neovim plugin that integrates [semgrep](https://semgrep.dev/) with the built-i
 Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 {
-  "johnsaigle/semgrep.nvim",
-  dependencies = { "jose-elias-alvarez/null-ls.nvim" },
+  'johnsaigle/semgrep.nvim',
+  dependencies = { 'nvimtools/none-ls.nvim' },
   opts = {
     -- your configuration
   }

@@ -11,9 +11,9 @@ end
 
 -- Run semgrep and populate diagnostics with the results.
 function M.semgrep()
-	local null_ls_ok, null_ls = pcall(require, "null-ls")
+	local null_ls_ok, null_ls = pcall(require, "none-ls")
 	if not null_ls_ok then
-		vim.notify("null-ls is required for semgrep-nvim", vim.log.levels.ERROR)
+		vim.notify("none-ls is required for semgrep-nvim", vim.log.levels.ERROR)
 		return
 	end
 
