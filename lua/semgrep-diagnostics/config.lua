@@ -5,12 +5,17 @@ M.enabled = true
 -- Corresponds to the `--config` parameter when invoking semgrep. Represents a ruleset or yaml file.
 M.semgrep_config = "auto"
 M.severity_map = {
-	ERROR = vim.diagnostic.severity.ERROR,
-	WARNING = vim.diagnostic.severity.WARN,
-	INFO = vim.diagnostic.severity.INFO,
-	HINT = vim.diagnostic.severity.HINT,
+	CRITICAL = vim.diagnostic.severity.ERROR,
+	ERROR = vim.diagnostic.severity.WARN,
+	WARNING = vim.diagnostic.severity.INFO,
+	INFO = vim.diagnostic.severity.HINT,
 }
-M.default_severity = vim.diagnostic.severity.WARN
+-- Used when the severity can't be parsed from the semgrep result.
+---@type integer
+M.default_severity = vim.diagnostic.severity.INFO
+-- Show all results by default.
+---@type integer
+M.minimum_severity = vim.diagnostic.severity.HINT
 M.extra_args = {}
 M.filetypes = {}
 
@@ -92,7 +97,7 @@ function M.set_minimum_severity(level)
 		vim.notify("Invalid severity level", vim.log.levels.ERROR)
 		return
 	end
-	M.config.default_severity = level
+	M.config.minimum_severity = level
 	vim.notify(string.format("Minimum severity set to: %s", level), vim.log.levels.INFO)
 end
 

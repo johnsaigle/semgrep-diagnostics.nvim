@@ -5,8 +5,8 @@ local config = require('semgrep-diagnostics.config')
 
 local function is_valid_diagnostic(result)
 	return result.extra and
-		result.extra.severity and
-		result.extra.message
+	    result.extra.severity and
+	    result.extra.message
 end
 
 -- Run semgrep and populate diagnostics with the results.
@@ -54,11 +54,11 @@ function M.semgrep()
 				for _, ruleset in ipairs(configs) do
 					-- Include rulesets from the registry
 					if vim.startswith(ruleset, "p/")
-						-- also allow the special "auto" option
-						or ruleset == "auto" then
+					    -- also allow the special "auto" option
+					    or ruleset == "auto" then
 						table.insert(args, "--config=" .. ruleset)
 					else
-						-- If using custom rulesets, first check if they exist. 
+						-- If using custom rulesets, first check if they exist.
 						-- Allow for single files or directories.
 						local path = vim.fn.expand(ruleset)
 						if vim.fn.filereadable(path) == 1 or vim.fn.isdirectory(path) == 1 then
@@ -96,6 +96,7 @@ function M.semgrep()
 						cwd = vim.fn.getcwd(),
 						env = vim.env,
 					},
+					-- TODO: Way too much indentation here. Should be refactored to use functions and/or continue statements.
 					function(obj)
 						local diags = {}
 						-- Parse JSON output
@@ -112,48 +113,66 @@ function M.semgrep()
 									    config.severity_map[result.extra.severity] or
 									    config.default_severity
 
-									-- Build the diagnostic message with rule information
-									local message = result.extra.message
-									if result.check_id then
-										message = string.format("%s [%s]",
-											message,
-											result.check_id
-										)
-									end
+									-- Ensure this result is relevant based on the user's settings.
+									-- Range is: Critical=1 Hint=4.
+									-- So if minimum severity is Warning (2), then
+									-- skip results that are greater.
+									if severity <= config.minimum_severity then
+										-- Build the diagnostic message with rule information
+										local message = result.extra.message
+										if result.check_id then
+											message = string.format(
+												"%s [%s]",
+												message,
+												result.check_id
+											)
+										end
 
-									local diag = {
-										lnum = result.start.line - 1,
-										col = result.start.col - 1,
-										end_lnum = result["end"].line - 1,
-										end_col = result["end"].col - 1,
-										source = "semgrep",
-										message = message,
-										severity = severity,
-										-- Store additional metadata in user_data
-										user_data = {
-											rule_id = result.check_id,
-											-- this will show which config file contained the rule
-											rule_source = result.path,
-											rule_details = {
-												category = result.extra.metadata and
-												    result.extra.metadata
-												    .category,
-												technology = result.extra
-												    .metadata and
-												    result.extra.metadata
-												    .technology,
-												confidence = result.extra
-												    .metadata and
-												    result.extra.metadata
-												    .confidence,
-												references = result.extra
-												    .metadata and
-												    result.extra.metadata
-												    .references
+										local diag = {
+											lnum = result.start.line - 1,
+											col = result.start.col - 1,
+											end_lnum = result["end"].line - 1,
+											end_col = result["end"].col - 1,
+											source = "semgrep",
+											message = message,
+											severity = severity,
+											-- Store additional metadata in user_data
+											user_data = {
+												rule_id = result
+												.check_id,
+												-- this will show which config file contained the rule
+												rule_source = result
+												.path,
+												rule_details = {
+													category = result
+													    .extra
+													    .metadata and
+													    result.extra
+													    .metadata
+													    .category,
+													technology =
+													    result.extra
+													    .metadata and
+													    result.extra
+													    .metadata
+													    .technology,
+													confidence =
+													    result.extra
+													    .metadata and
+													    result.extra
+													    .metadata
+													    .confidence,
+													references =
+													    result.extra
+													    .metadata and
+													    result.extra
+													    .metadata
+													    .references
+												}
 											}
 										}
-									}
-									table.insert(diags, diag)
+										table.insert(diags, diag)
+									end
 								end
 							end
 
@@ -174,7 +193,6 @@ function M.semgrep()
 
 	null_ls.register(semgrep_generator)
 end
-
 
 function M.show_rule_details()
 	-- Get the diagnostics under the cursor
