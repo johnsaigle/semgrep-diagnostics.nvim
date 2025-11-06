@@ -1,12 +1,163 @@
 local M = {}
 
-local namespace = nil
 local config = require('semgrep-diagnostics.config')
+-- Track debounce timers per buffer to avoid running on incomplete code
+local debounce_timers = {}
 
 local function is_valid_diagnostic(result)
 	return result.extra and
 	    result.extra.severity and
 	    result.extra.message
+end
+
+-- Extract the actual semgrep execution into a separate function
+function M.run_semgrep_scan(params)
+	-- Get semgrep or opengrep executable path
+	local cmd = ""
+	local semgrep_path = vim.fn.exepath("semgrep")
+	if semgrep_path == "" then
+		local opengrep_path = vim.fn.exepath("opengrep")
+		if opengrep_path == "" then
+			vim.notify("semgrep executable not found in PATH", vim.log.levels.ERROR)
+			return
+		else
+			cmd = "opengrep"
+		end
+	else
+		cmd = "semgrep"
+	end
+
+	local filepath = vim.api.nvim_buf_get_name(params.bufnr)
+
+	-- Build command arguments.
+	local args = {
+		"--json",
+		"--quiet",
+	}
+
+	-- Add all config paths.
+	local configs = config.normalize_config(config.semgrep_config)
+	for _, ruleset in ipairs(configs) do
+		-- Include rulesets from the registry
+		if vim.startswith(ruleset, "p/")
+			-- also allow the special "auto" option
+			or ruleset == "auto" then
+			table.insert(args, "--config=" .. ruleset)
+		else
+			-- If using custom rulesets, first check if they exist. 
+			-- Allow for single files or directories.
+			local path = vim.fn.expand(ruleset)
+			if vim.fn.filereadable(path) == 1 or vim.fn.isdirectory(path) == 1 then
+				table.insert(args, "--config=" .. ruleset)
+			else
+				vim.notify(
+					string.format("Semgrep config not found, skipping: %s",
+						config),
+					vim.log.levels.WARN
+				)
+			end
+		end
+	end
+
+	-- Add filepath
+	table.insert(args, filepath)
+
+	-- Add any extra arguments
+	for _, arg in ipairs(config.extra_args) do
+		table.insert(args, arg)
+	end
+
+	-- Create async system command
+	local full_cmd = vim.list_extend({ cmd }, args)
+
+	-- TODO check nil when creating the file handle
+	local f = io.open("/tmp/nvim_debug.log", "a")
+	f:write(vim.inspect(vim.fn.join(full_cmd, " ")) .. "\n")
+	f:close()
+
+	vim.system(
+		full_cmd,
+		{
+			text = true,
+			cwd = vim.fn.getcwd(),
+			env = vim.env,
+		},
+		function(obj)
+			local diags = {}
+			-- Parse JSON output
+			local ok, parsed = pcall(vim.json.decode, obj.stdout)
+			if ok and parsed then
+				local f = io.open("/tmp/nvim_debug.log", "a")
+				f:write(vim.inspect(parsed) .. "\n")
+				f:close()
+
+				-- Convert results to diagnostics
+				for _, result in ipairs(parsed.results) do
+					if is_valid_diagnostic(result) then
+						local severity = result.extra.severity and
+						    config.severity_map[result.extra.severity] or
+						    config.default_severity
+
+						-- Build the diagnostic message with rule information
+						local message = result.extra.message
+						if result.check_id then
+							message = string.format("%s [%s]",
+								message,
+								result.check_id
+							)
+						end
+
+						local diag = {
+							lnum = result.start.line - 1,
+							col = result.start.col - 1,
+							end_lnum = result["end"].line - 1,
+							end_col = result["end"].col - 1,
+							source = "semgrep",
+							message = message,
+							severity = severity,
+							-- Store additional metadata in user_data
+							user_data = {
+								rule_id = result.check_id,
+								-- this will show which config file contained the rule
+								rule_source = result.path,
+								rule_details = {
+									category = result.extra.metadata and
+									    result.extra.metadata
+									    .category,
+									technology = result.extra
+									    .metadata and
+									    result.extra.metadata
+									    .technology,
+									confidence = result.extra
+									    .metadata and
+									    result.extra.metadata
+									    .confidence,
+									references = result.extra
+									    .metadata and
+									    result.extra.metadata
+									    .references
+								}
+							}
+						}
+						table.insert(diags, diag)
+					end
+				end
+
+				-- FIX #2: Explicitly clear old diagnostics before setting new ones
+				-- Schedule the diagnostic updates
+				vim.schedule(function()
+					-- Verify buffer is still valid
+					if not vim.api.nvim_buf_is_valid(params.bufnr) then
+						return
+					end
+					-- Clear old diagnostics first
+					vim.diagnostic.reset(config.namespace, params.bufnr)
+					-- Set new diagnostics
+					vim.diagnostic.set(config.namespace, params.bufnr, diags)
+				end)
+			end
+		end
+	)
 end
 
 -- Run semgrep and populate diagnostics with the results.
@@ -18,7 +169,10 @@ function M.semgrep()
 	end
 
 	local semgrep_generator = {
-		method = null_ls.methods.DIAGNOSTICS,
+		-- Use DIAGNOSTICS_ON_SAVE for save-only, DIAGNOSTICS for all changes
+		method = config.run_mode == "save" 
+			and null_ls.methods.DIAGNOSTICS_ON_SAVE 
+			or null_ls.methods.DIAGNOSTICS,
 		filetypes = config.filetypes,
 		generator = {
 			-- Configure when to run the diagnostics
@@ -26,19 +180,25 @@ function M.semgrep()
 				return config.enabled
 			end,
 			fn = function(params)
-				-- Get semgrep or opengrep executable path
-				local cmd = ""
-				local semgrep_path = vim.fn.exepath("semgrep")
-				if semgrep_path == "" then
-					local opengrep_path = vim.fn.exepath("opengrep")
-					if opengrep_path == "" then
-						vim.notify("semgrep executable not found in PATH", vim.log.levels.ERROR)
-						return {}
-					else
-						cmd = "opengrep"
+				-- FIX #1: Debounce to avoid running on incomplete code
+				-- Only debounce if in "change" mode; save mode doesn't need it
+				if config.run_mode == "change" then
+					-- Cancel any existing timer for this buffer
+					if debounce_timers[params.bufnr] then
+						debounce_timers[params.bufnr]:stop()
+						debounce_timers[params.bufnr]:close()
 					end
+
+					-- Create a new timer that will run after debounce delay
+					debounce_timers[params.bufnr] = vim.defer_fn(function()
+						M.run_semgrep_scan(params)
+					end, config.debounce_ms)
+
+					return {}
 				else
-					cmd = "semgrep"
+					-- In save mode, run immediately (file is already saved and valid)
+					M.run_semgrep_scan(params)
+					return {}
 				end
 
 				local filepath = vim.api.nvim_buf_get_name(params.bufnr)
@@ -200,7 +360,7 @@ function M.show_rule_details()
 	local line = cursor_pos[1] - 1
 	local col = cursor_pos[2]
 	local diagnostics = vim.diagnostic.get(0, {
-		namespace = vim.api.nvim_create_namespace("semgrep-nvim"),
+		namespace = config.namespace,
 		lnum = line
 	})
 

@@ -1,5 +1,6 @@
 local M = {}
-local namespace = vim.api.nvim_create_namespace("semgrep-nvim")
+-- Create namespace once and export it for reuse
+M.namespace = vim.api.nvim_create_namespace("semgrep-nvim")
 
 M.enabled = true
 -- Corresponds to the `--config` parameter when invoking semgrep. Represents a ruleset or yaml file.
@@ -18,6 +19,10 @@ M.default_severity = vim.diagnostic.severity.INFO
 M.minimum_severity = vim.diagnostic.severity.HINT
 M.extra_args = {}
 M.filetypes = {}
+-- Run mode: "save" = only on file save, "change" = debounced while typing
+M.run_mode = "save"
+-- Debounce delay in milliseconds (only used if run_mode = "change")
+M.debounce_ms = 1000
 
 function M.print_config()
 	local config_lines = { "Current Semgrep Configuration:" }
@@ -39,7 +44,7 @@ function M.toggle()
 		local bufs = vim.api.nvim_list_bufs()
 		for _, buf in ipairs(bufs) do
 			if vim.api.nvim_buf_is_valid(buf) then
-				vim.diagnostic.reset(namespace, buf)
+				vim.diagnostic.reset(M.namespace, buf)
 			end
 		end
 		vim.notify("Semgrep diagnostics disabled", vim.log.levels.INFO)
