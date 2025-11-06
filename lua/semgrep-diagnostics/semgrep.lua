@@ -93,11 +93,15 @@ function M.run_semgrep_scan(params)
 
 				-- Convert results to diagnostics
 				for _, result in ipairs(parsed.results) do
-					if is_valid_diagnostic(result) then
-						local severity = result.extra.severity and
-						    config.severity_map[result.extra.severity] or
-						    config.default_severity
+				if is_valid_diagnostic(result) then
+					local severity = result.extra.severity and
+					    config.severity_map[result.extra.severity] or
+					    config.default_severity
 
+					-- Ensure this result is relevant based on the user's settings.
+					-- Range is: Critical=1 Hint=4.
+					-- So if minimum severity is Warning (2), then skip results that are greater.
+					if severity <= config.minimum_severity then
 						-- Build the diagnostic message with rule information
 						local message = result.extra.message
 						if result.check_id then
@@ -141,6 +145,7 @@ function M.run_semgrep_scan(params)
 						}
 						table.insert(diags, diag)
 					end
+				end
 				end
 
 				-- FIX #2: Explicitly clear old diagnostics before setting new ones
@@ -200,153 +205,6 @@ function M.semgrep()
 					M.run_semgrep_scan(params)
 					return {}
 				end
-
-				local filepath = vim.api.nvim_buf_get_name(params.bufnr)
-
-				-- Build command arguments.
-				local args = {
-					"--json",
-					"--quiet",
-				}
-
-				-- Add all config paths.
-				local configs = config.normalize_config(config.semgrep_config)
-				for _, ruleset in ipairs(configs) do
-					-- Include rulesets from the registry
-					if vim.startswith(ruleset, "p/")
-					    -- also allow the special "auto" option
-					    or ruleset == "auto" then
-						table.insert(args, "--config=" .. ruleset)
-					else
-						-- If using custom rulesets, first check if they exist.
-						-- Allow for single files or directories.
-						local path = vim.fn.expand(ruleset)
-						if vim.fn.filereadable(path) == 1 or vim.fn.isdirectory(path) == 1 then
-							table.insert(args, "--config=" .. ruleset)
-						else
-							vim.notify(
-								string.format("Semgrep config not found, skipping: %s",
-									config),
-								vim.log.levels.WARN
-							)
-						end
-					end
-				end
-
-				-- Add filepath
-				table.insert(args, filepath)
-
-				-- Add any extra arguments
-				for _, arg in ipairs(config.extra_args) do
-					table.insert(args, arg)
-				end
-
-				-- Create async system command
-				local full_cmd = vim.list_extend({ cmd }, args)
-
-				-- TODO check nil when creating the file handle
-				local f = io.open("/tmp/nvim_debug.log", "a")
-				f:write(vim.inspect(vim.fn.join(full_cmd, " ")) .. "\n")
-				f:close()
-
-				vim.system(
-					full_cmd,
-					{
-						text = true,
-						cwd = vim.fn.getcwd(),
-						env = vim.env,
-					},
-					-- TODO: Way too much indentation here. Should be refactored to use functions and/or continue statements.
-					function(obj)
-						local diags = {}
-						-- Parse JSON output
-						local ok, parsed = pcall(vim.json.decode, obj.stdout)
-						if ok and parsed then
-							local f = io.open("/tmp/nvim_debug.log", "a")
-							f:write(vim.inspect(parsed) .. "\n")
-							f:close()
-
-							-- Convert results to diagnostics
-							for _, result in ipairs(parsed.results) do
-								if is_valid_diagnostic(result) then
-									local severity = result.extra.severity and
-									    config.severity_map[result.extra.severity] or
-									    config.default_severity
-
-									-- Ensure this result is relevant based on the user's settings.
-									-- Range is: Critical=1 Hint=4.
-									-- So if minimum severity is Warning (2), then
-									-- skip results that are greater.
-									if severity <= config.minimum_severity then
-										-- Build the diagnostic message with rule information
-										local message = result.extra.message
-										if result.check_id then
-											message = string.format(
-												"%s [%s]",
-												message,
-												result.check_id
-											)
-										end
-
-										local diag = {
-											lnum = result.start.line - 1,
-											col = result.start.col - 1,
-											end_lnum = result["end"].line - 1,
-											end_col = result["end"].col - 1,
-											source = "semgrep",
-											message = message,
-											severity = severity,
-											-- Store additional metadata in user_data
-											user_data = {
-												rule_id = result
-												.check_id,
-												-- this will show which config file contained the rule
-												rule_source = result
-												.path,
-												rule_details = {
-													category = result
-													    .extra
-													    .metadata and
-													    result.extra
-													    .metadata
-													    .category,
-													technology =
-													    result.extra
-													    .metadata and
-													    result.extra
-													    .metadata
-													    .technology,
-													confidence =
-													    result.extra
-													    .metadata and
-													    result.extra
-													    .metadata
-													    .confidence,
-													references =
-													    result.extra
-													    .metadata and
-													    result.extra
-													    .metadata
-													    .references
-												}
-											}
-										}
-										table.insert(diags, diag)
-									end
-								end
-							end
-
-							-- Schedule the diagnostic updates
-							vim.schedule(function()
-								local namespace = vim.api.nvim_create_namespace(
-									"semgrep-nvim")
-								vim.diagnostic.set(namespace, params.bufnr, diags)
-							end)
-						end
-					end
-				)
-
-				return {}
 			end
 		}
 	}

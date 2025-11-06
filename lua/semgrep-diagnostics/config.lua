@@ -102,7 +102,7 @@ function M.set_minimum_severity(level)
 		vim.notify("Invalid severity level", vim.log.levels.ERROR)
 		return
 	end
-	M.config.minimum_severity = level
+	M.minimum_severity = level
 	vim.notify(string.format("Minimum severity set to: %s", level), vim.log.levels.INFO)
 end
 
