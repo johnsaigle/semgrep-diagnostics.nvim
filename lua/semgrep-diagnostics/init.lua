@@ -68,13 +68,13 @@ local adapter = sast.create_adapter({
 			message = string.format("%s [%s]", message, result.check_id)
 		end
 		
-		-- Note: vim.diagnostic.set() expects 0-indexed lnum/end_lnum and col/end_col
-		-- Semgrep provides 1-based line and column numbers, so we need to subtract 1
+		-- Note: none-ls expects 1-indexed row/end_row and col/end_col
+		-- Semgrep provides 1-based line and column numbers, which matches none-ls expectations
 		return {
-			lnum = result.start.line - 1,
-			col = result.start.col - 1,
-			end_lnum = result["end"].line - 1,
-			end_col = result["end"].col - 1,
+			row = result.start.line,
+			col = result.start.col,
+			end_row = result["end"].line,
+			end_col = result["end"].col,
 			source = "semgrep",
 			message = message,
 			severity = severity,
